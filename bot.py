@@ -7,112 +7,124 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-print("bot starting")
-
 TOKEN = (os.getenv("DISCORD_BOT_TOKEN") or "").strip()
 SERPAPI_KEY = (os.getenv("SERPAPI_KEY") or "").strip()
-GOOGLE_TRENDS_CHANNEL_ID = 1503070666457350328
-
-print("token exists:", bool(TOKEN))
-print("serpapi key exists:", bool(SERPAPI_KEY))
-print("google trends channel:", GOOGLE_TRENDS_CHANNEL_ID)
+ALLOWED_CHANNEL_ID = 1503070666457350328
 
 if not TOKEN:
-    raise ValueError("DISCORD_BOT_TOKEN is missing")
+    raise ValueError("Missing DISCORD_BOT_TOKEN")
 
 if not SERPAPI_KEY:
-    raise ValueError("SERPAPI_KEY is missing")
+    raise ValueError("Missing SERPAPI_KEY")
 
 intents = discord.Intents.default()
 intents.message_content = True
 
 bot = commands.Bot(command_prefix="", intents=intents)
 
-def parse_timeframe(raw: str):
-    t = raw.lower().strip().replace(" ", "")
-    if t in ["1w", "1week"]:
-        return ("now 7-d", "1 Week")
-    if t in ["1m", "1month"]:
-        return ("today 1-m", "1 Month")
-    if t in ["3m", "3months"]:
-        return ("today 3-m", "3 Months")
-    if t in ["6m", "6months"]:
-        return ("today 6-m", "6 Months")
-    if t in ["1y", "1year"]:
-        return ("today 12-m", "1 Year")
-    return (None, None)
+def parse_timeframe(text: str):
+    value = text.lower().strip()
+    mapping = {
+        "1w": ("now 7-d", "1 Week"),
+        "1week": ("now 7-d", "1 Week"),
+        "1m": ("today 1-m", "1 Month"),
+        "1month": ("today 1-m", "1 Month"),
+        "3m": ("today 3-m", "3 Months"),
+        "3month": ("today 3-m", "3 Months"),
+        "3months": ("today 3-m", "3 Months"),
+        "6m": ("today 6-m", "6 Months"),
+        "6month": ("today 6-m", "6 Months"),
+        "6months": ("today 6-m", "6 Months"),
+        "1y": ("today 12-m", "1 Year"),
+        "1year": ("today 12-m", "1 Year"),
+        "all": ("all", "All Time"),
+        "alltime": ("all", "All Time"),
+        "all time": ("all", "All Time"),
+    }
+    return mapping.get(value, (None, None))
 
 def extract_keyword_and_timeframe(message_text: str):
     raw = message_text.strip()
     if not raw.lower().startswith("google "):
-        return (None, None)
+        return None, None
 
     body = raw[7:].strip()
-    patterns = [
-        " 1w",
-        " 1week",
-        " 1m",
-        " 1month",
-        " 3m",
-        " 3months",
-        " 3 months",
-        " 6m",
-        " 6months",
-        " 6 months",
-        " 1y",
-        " 1year",
-        " 1 year"
-    ]
+    parts = body.split()
 
-    lower_body = body.lower()
-    for p in patterns:
-        if lower_body.endswith(p):
-            keyword = body[: -len(p)].strip()
-            timeframe = body[-len(p):].strip()
-            return (keyword, timeframe)
+    if len(parts) < 2:
+        return None, None
 
-    return (None, None)
+    candidates = []
 
-def fetch_trends_data(keyword: str, date_value: str):
+    if len(parts) >= 2:
+        candidates.append(" ".join(parts[-2:]).lower())
+    candidates.append(parts[-1].lower())
+
+    normalized = {
+        "1 week": "1week",
+        "1 month": "1month",
+        "3 months": "3months",
+        "6 months": "6months",
+        "1 year": "1year",
+        "all time": "all time",
+    }
+
+    for candidate in candidates:
+        tf = normalized.get(candidate, candidate.replace(" ", ""))
+        date_value, label = parse_timeframe(tf)
+        if date_value:
+            keyword_part_len = 2 if candidate in normalized and candidate == "all time" else (
+                2 if candidate in ["1 week", "1 month", "3 months", "6 months", "1 year"] else 1
+            )
+            keyword = " ".join(parts[:-keyword_part_len]).strip()
+            if keyword:
+                return keyword, tf
+
+    return None, None
+
+def fetch_trends(keyword: str, date_value: str):
     params = {
         "engine": "google_trends",
         "q": keyword,
         "data_type": "TIMESERIES",
         "date": date_value,
-        "api_key": SERPAPI_KEY
+        "geo": "SE",
+        "hl": "en",
+        "api_key": SERPAPI_KEY,
     }
 
     search = GoogleSearch(params)
     results = search.get_dict()
 
-    if "error" in results:
+    if results.get("error"):
         raise Exception(results["error"])
 
-    timeline_data = results.get("interest_over_time", {}).get("timeline_data", [])
-    if not timeline_data:
-        raise Exception("No timeline data returned from SerpApi")
+    timeline = results.get("interest_over_time", {}).get("timeline_data", [])
+    if not timeline:
+        raise Exception("No timeline data returned")
 
     labels = []
     values = []
 
-    for point in timeline_data:
+    for point in timeline:
         labels.append(point.get("date", ""))
         point_values = point.get("values", [])
         if point_values and isinstance(point_values, list):
-            extracted_value = point_values[0].get("extracted_value", 0)
-            values.append(int(extracted_value))
+            values.append(int(point_values[0].get("extracted_value", 0)))
         else:
             values.append(0)
 
     return labels, values
 
-def build_chart(keyword: str, label: str, labels, values):
+def make_chart(keyword: str, timeframe_label: str, labels, values):
     plt.style.use("dark_background")
     fig, ax = plt.subplots(figsize=(12, 6))
-    ax.plot(range(len(values)), values, color="#4f8cff", linewidth=2.5)
-    ax.fill_between(range(len(values)), values, color="#4f8cff", alpha=0.2)
-    ax.set_title(f"Google Trends: {keyword} ({label})", fontsize=18, pad=16)
-    ax.set_xlabel("Time")
+
+    x = list(range(len(values)))
+    ax.plot(x, values, color="#4f8cff", linewidth=2.5)
+    ax.fill_between(x, values, color="#4f8cff", alpha=0.22)
+
+    ax.set_title(f"Google Trends: {keyword} ({timeframe_label})", fontsize=18, pad=14)
     ax.set_ylabel("Interest")
     ax.set_ylim(0, 100)
     ax.grid(True, alpha=0.2)
@@ -125,9 +137,6 @@ def build_chart(keyword: str, label: str, labels, values):
         ax.set_xticks(tick_positions)
         ax.set_xticklabels(tick_labels, rotation=30, ha="right", fontsize=8)
 
-    for spine in ax.spines.values():
-        spine.set_alpha(0.3)
-
     fig.tight_layout()
 
     buffer = io.BytesIO()
@@ -138,67 +147,57 @@ def build_chart(keyword: str, label: str, labels, values):
 
 @bot.event
 async def on_ready():
-    print(f"✅ Logged in as {bot.user}")
+    print(f"Logged in as {bot.user} ({bot.user.id})")
 
-@bot.event
+@bot.listen()
 async def on_message(message):
     if message.author.bot:
         return
 
-    if message.channel.id != GOOGLE_TRENDS_CHANNEL_ID:
+    if message.channel.id != ALLOWED_CHANNEL_ID:
         return
 
     if not message.content.lower().startswith("google "):
-        await bot.process_commands(message)
         return
 
     keyword, timeframe_raw = extract_keyword_and_timeframe(message.content)
-
     if not keyword or not timeframe_raw:
         await message.channel.send(
-            "Use: `google <keyword> <1w|1month|3months|6months|1year>`\n"
-            "Examples: `google bitcoin 1w`, `google solana 3 months`, `google ai 1 year`"
+            "Use: `google <keyword> <1w|1month|3months|6months|1year|all time>`\n"
+            "Examples: `google bitcoin 1w`, `google solana 3 months`, `google ethereum 1 year`, `google bitcoin all time`"
         )
         return
 
-    date_value, label = parse_timeframe(timeframe_raw)
+    date_value, timeframe_label = parse_timeframe(timeframe_raw)
     if not date_value:
-        await message.channel.send(
-            "Invalid timeframe. Use `1w`, `1month`, `3months`, `6months`, or `1year`."
-        )
+        await message.channel.send("Invalid timeframe.")
         return
-
-    await message.channel.send(f"Fetching Google Trends for **{keyword}** ({label})...")
 
     try:
-        labels, values = fetch_trends_data(keyword, date_value)
+        await message.channel.send(f"Fetching Google Trends for **{keyword}** ({timeframe_label})...")
 
-        if not values:
-            await message.channel.send("No Google Trends data found for that keyword/timeframe.")
-            return
+        labels, values = fetch_trends(keyword, date_value)
+        chart_buffer = make_chart(keyword, timeframe_label, labels, values)
 
-        latest_value = int(values[-1])
-        peak_value = int(max(values))
+        latest_value = values[-1] if values else 0
+        peak_value = max(values) if values else 0
 
-        chart_buffer = build_chart(keyword, label, labels, values)
         file = discord.File(chart_buffer, filename="google-trends.png")
 
         embed = discord.Embed(
             title=f"Google Trends: {keyword}",
-            description=f"Timeframe: **{label}**",
+            description=f"Timeframe: **{timeframe_label}**",
             color=discord.Color.blue()
         )
         embed.add_field(name="Latest interest", value=str(latest_value), inline=True)
         embed.add_field(name="Peak interest", value=str(peak_value), inline=True)
-        embed.set_footer(text="Google Trends values are relative interest, scaled 0–100.")
+        embed.set_footer(text="Google Trends values are relative interest from 0 to 100.")
         embed.set_image(url="attachment://google-trends.png")
 
-        await message.channel.send(embed=embed, file=file)
+        await message.channel.send(file=file, embed=embed)
 
     except Exception as e:
-        print("Google Trends command failed:", str(e))
-        await message.channel.send(f"Failed to fetch Google Trends data: `{str(e)[:150]}`")
-
-    await bot.process_commands(message)
+        print("Trend fetch error:", repr(e))
+        await message.channel.send(f"Failed to fetch Google Trends data: `{str(e)[:180]}`")
 
 bot.run(TOKEN)
