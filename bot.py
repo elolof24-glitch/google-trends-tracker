@@ -2,7 +2,7 @@ import os
 import io
 import discord
 from discord.ext import commands
-from pytrends.request import TrendReq
+from serpapi import GoogleSearch
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -10,14 +10,18 @@ import matplotlib.pyplot as plt
 print("bot starting")
 
 TOKEN = (os.getenv("DISCORD_BOT_TOKEN") or "").strip()
+SERPAPI_KEY = (os.getenv("SERPAPI_KEY") or "").strip()
 GOOGLE_TRENDS_CHANNEL_ID = 1503070666457350328
 
 print("token exists:", bool(TOKEN))
-print("token parts:", len(TOKEN.split(".")) if TOKEN else 0)
+print("serpapi key exists:", bool(SERPAPI_KEY))
 print("google trends channel:", GOOGLE_TRENDS_CHANNEL_ID)
 
 if not TOKEN:
     raise ValueError("DISCORD_BOT_TOKEN is missing")
+
+if not SERPAPI_KEY:
+    raise ValueError("SERPAPI_KEY is missing")
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -69,6 +73,69 @@ def extract_keyword_and_timeframe(message_text: str):
 
     return (None, None)
 
+def fetch_trends_data(keyword: str, date_value: str):
+    params = {
+        "engine": "google_trends",
+        "q": keyword,
+        "data_type": "TIMESERIES",
+        "date": date_value,
+        "api_key": SERPAPI_KEY
+    }
+
+    search = GoogleSearch(params)
+    results = search.get_dict()
+
+    if "error" in results:
+        raise Exception(results["error"])
+
+    timeline_data = results.get("interest_over_time", {}).get("timeline_data", [])
+    if not timeline_data:
+        raise Exception("No timeline data returned from SerpApi")
+
+    labels = []
+    values = []
+
+    for point in timeline_data:
+        labels.append(point.get("date", ""))
+        point_values = point.get("values", [])
+        if point_values and isinstance(point_values, list):
+            extracted_value = point_values[0].get("extracted_value", 0)
+            values.append(int(extracted_value))
+        else:
+            values.append(0)
+
+    return labels, values
+
+def build_chart(keyword: str, label: str, labels, values):
+    plt.style.use("dark_background")
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.plot(range(len(values)), values, color="#4f8cff", linewidth=2.5)
+    ax.fill_between(range(len(values)), values, color="#4f8cff", alpha=0.2)
+    ax.set_title(f"Google Trends: {keyword} ({label})", fontsize=18, pad=16)
+    ax.set_xlabel("Time")
+    ax.set_ylabel("Interest")
+    ax.set_ylim(0, 100)
+    ax.grid(True, alpha=0.2)
+
+    max_ticks = 8
+    if len(labels) > 1:
+        step = max(1, len(labels) // max_ticks)
+        tick_positions = list(range(0, len(labels), step))
+        tick_labels = [labels[i] for i in tick_positions]
+        ax.set_xticks(tick_positions)
+        ax.set_xticklabels(tick_labels, rotation=30, ha="right", fontsize=8)
+
+    for spine in ax.spines.values():
+        spine.set_alpha(0.3)
+
+    fig.tight_layout()
+
+    buffer = io.BytesIO()
+    plt.savefig(buffer, format="png", dpi=150, bbox_inches="tight")
+    buffer.seek(0)
+    plt.close(fig)
+    return buffer
+
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user}")
@@ -94,8 +161,8 @@ async def on_message(message):
         )
         return
 
-    timeframe, label = parse_timeframe(timeframe_raw)
-    if not timeframe:
+    date_value, label = parse_timeframe(timeframe_raw)
+    if not date_value:
         await message.channel.send(
             "Invalid timeframe. Use `1w`, `1month`, `3months`, `6months`, or `1year`."
         )
@@ -104,39 +171,17 @@ async def on_message(message):
     await message.channel.send(f"Fetching Google Trends for **{keyword}** ({label})...")
 
     try:
-        pytrends = TrendReq(hl="en-US", tz=0)
-        pytrends.build_payload([keyword], timeframe=timeframe)
-        df = pytrends.interest_over_time()
+        labels, values = fetch_trends_data(keyword, date_value)
 
-        if df.empty or keyword not in df.columns:
+        if not values:
             await message.channel.send("No Google Trends data found for that keyword/timeframe.")
             return
 
-        series = df[keyword]
-        latest_value = int(series.iloc[-1])
-        peak_value = int(series.max())
+        latest_value = int(values[-1])
+        peak_value = int(max(values))
 
-        plt.style.use("dark_background")
-        fig, ax = plt.subplots(figsize=(12, 6))
-        ax.plot(series.index, series.values, color="#4f8cff", linewidth=2.5)
-        ax.fill_between(series.index, series.values, color="#4f8cff", alpha=0.2)
-        ax.set_title(f"Google Trends: {keyword} ({label})", fontsize=18, pad=16)
-        ax.set_xlabel("Date")
-        ax.set_ylabel("Interest")
-        ax.set_ylim(0, 100)
-        ax.grid(True, alpha=0.2)
-
-        for spine in ax.spines.values():
-            spine.set_alpha(0.3)
-
-        fig.tight_layout()
-
-        buffer = io.BytesIO()
-        plt.savefig(buffer, format="png", dpi=150, bbox_inches="tight")
-        buffer.seek(0)
-        plt.close(fig)
-
-        file = discord.File(buffer, filename="google-trends.png")
+        chart_buffer = build_chart(keyword, label, labels, values)
+        file = discord.File(chart_buffer, filename="google-trends.png")
 
         embed = discord.Embed(
             title=f"Google Trends: {keyword}",
@@ -152,7 +197,7 @@ async def on_message(message):
 
     except Exception as e:
         print("Google Trends command failed:", str(e))
-        await message.channel.send("Failed to fetch Google Trends data for that request.")
+        await message.channel.send(f"Failed to fetch Google Trends data: `{str(e)[:150]}`")
 
     await bot.process_commands(message)
 
