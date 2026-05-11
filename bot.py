@@ -124,14 +124,20 @@ def make_chart(keyword: str, timeframe_label: str, labels, values):
 
     x = list(range(len(values)))
 
-    ax.plot(x, values, color="#4285F4", linewidth=2.5)
-    ax.fill_between(x, values, 0, color="#4285F4", alpha=0.08)
+    ax.plot(x, values, color="#1a73e8", linewidth=3.5)
+    ax.fill_between(x, values, 0, color="#1a73e8", alpha=0.12)
 
-    ax.set_title(f"{keyword} ({timeframe_label})", fontsize=16, color="#202124", pad=14)
-    ax.set_ylabel("Interest", fontsize=10, color="#5f6368")
+    ax.set_title(
+        f"TEST UI CHANGE - {keyword} ({timeframe_label})",
+        fontsize=18,
+        color="#202124",
+        pad=16,
+        fontweight="bold"
+    )
+    ax.set_ylabel("Interest", fontsize=11, color="#5f6368")
     ax.set_ylim(0, 100)
 
-    ax.grid(axis="y", color="#e8eaed", linewidth=1)
+    ax.grid(axis="y", color="#e8eaed", linewidth=1.2)
     ax.grid(axis="x", visible=False)
 
     ax.spines["top"].set_visible(False)
@@ -155,7 +161,7 @@ def make_chart(keyword: str, timeframe_label: str, labels, values):
     fig.tight_layout()
 
     buffer = io.BytesIO()
-    plt.savefig(buffer, format="png", dpi=160, bbox_inches="tight", facecolor="white")
+    plt.savefig(buffer, format="png", dpi=180, bbox_inches="tight", facecolor="white")
     buffer.seek(0)
     plt.close(fig)
     return buffer
