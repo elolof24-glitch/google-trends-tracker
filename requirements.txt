@@ -1,5 +1,5 @@
 discord.py
 python-dotenv
-pytrends
 matplotlib
 pandas
+google-search-results
