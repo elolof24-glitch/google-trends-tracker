@@ -40,6 +40,8 @@ def parse_timeframe(raw: str):
         return ("today 6-m", "6 Months")
     if t in ["1y", "1year"]:
         return ("today 12-m", "1 Year")
+    if t in ["all", "alltime", "all-time"]:
+        return ("all", "All Time")
     return (None, None)
 
 def extract_keyword_and_timeframe(message_text: str):
@@ -61,7 +63,11 @@ def extract_keyword_and_timeframe(message_text: str):
         " 6 months",
         " 1y",
         " 1year",
-        " 1 year"
+        " 1 year",
+        " all",
+        " alltime",
+        " all-time",
+        " all time"
     ]
 
     lower_body = body.lower()
@@ -108,30 +114,54 @@ def fetch_trends_data(keyword: str, date_value: str):
 
 def build_chart(keyword: str, label: str, labels, values):
     plt.style.use("dark_background")
-    fig, ax = plt.subplots(figsize=(12, 6))
-    ax.plot(range(len(values)), values, color="#4f8cff", linewidth=2.5)
-    ax.fill_between(range(len(values)), values, color="#4f8cff", alpha=0.2)
-    ax.set_title(f"Google Trends: {keyword} ({label})", fontsize=18, pad=16)
-    ax.set_xlabel("Time")
-    ax.set_ylabel("Interest")
-    ax.set_ylim(0, 100)
-    ax.grid(True, alpha=0.2)
+    fig, ax = plt.subplots(figsize=(12, 5))
 
+    x = range(len(values))
+    ax.plot(x, values, color="#4285F4", linewidth=2.5, zorder=3)
+    ax.fill_between(x, values, color="#4285F4", alpha=0.15, zorder=2)
+
+    ax.set_title(f"Google Trends: {keyword}", fontsize=17, fontweight="bold", pad=14)
+    ax.set_xlabel("Time", fontsize=10, labelpad=8)
+    ax.set_ylabel("Interest (0–100)", fontsize=10, labelpad=8)
+    ax.set_ylim(0, 105)
+    ax.set_xlim(0, max(len(values) - 1, 1))
+
+    ax.grid(True, axis="y", alpha=0.15, linestyle="--", zorder=1)
+    ax.grid(False, axis="x")
+
+    # Smart tick positioning: target ~8 evenly-spaced labels
     max_ticks = 8
-    if len(labels) > 1:
-        step = max(1, len(labels) // max_ticks)
-        tick_positions = list(range(0, len(labels), step))
+    n = len(labels)
+    if n > 1:
+        step = max(1, (n - 1) // (max_ticks - 1))
+        tick_positions = list(range(0, n, step))
+        # Always include the last point
+        if tick_positions[-1] != n - 1:
+            tick_positions.append(n - 1)
         tick_labels = [labels[i] for i in tick_positions]
         ax.set_xticks(tick_positions)
-        ax.set_xticklabels(tick_labels, rotation=30, ha="right", fontsize=8)
+        ax.set_xticklabels(tick_labels, rotation=35, ha="right", fontsize=8)
+    elif n == 1:
+        ax.set_xticks([0])
+        ax.set_xticklabels(labels, fontsize=8)
 
+    # Subtle spines
     for spine in ax.spines.values():
-        spine.set_alpha(0.3)
+        spine.set_alpha(0.2)
 
-    fig.tight_layout()
+    # Watermark-style timeframe label in top-right corner
+    ax.text(
+        0.99, 0.97, label,
+        transform=ax.transAxes,
+        fontsize=9, color="white", alpha=0.45,
+        ha="right", va="top"
+    )
+
+    fig.tight_layout(pad=1.5)
 
     buffer = io.BytesIO()
-    plt.savefig(buffer, format="png", dpi=150, bbox_inches="tight")
+    plt.savefig(buffer, format="png", dpi=150, bbox_inches="tight",
+                facecolor=fig.get_facecolor())
     buffer.seek(0)
     plt.close(fig)
     return buffer
@@ -156,15 +186,16 @@ async def on_message(message):
 
     if not keyword or not timeframe_raw:
         await message.channel.send(
-            "Use: `google <keyword> <1w|1month|3months|6months|1year>`\n"
-            "Examples: `google bitcoin 1w`, `google solana 3 months`, `google ai 1 year`"
+            "Use: `google <keyword> <timeframe>`\n"
+            "Timeframes: `1w` · `1month` · `3months` · `6months` · `1year` · `all time`\n"
+            "Examples: `google bitcoin 1w`, `google solana 3 months`, `google ai all time`"
         )
         return
 
     date_value, label = parse_timeframe(timeframe_raw)
     if not date_value:
         await message.channel.send(
-            "Invalid timeframe. Use `1w`, `1month`, `3months`, `6months`, or `1year`."
+            "Invalid timeframe. Use `1w`, `1month`, `3months`, `6months`, `1year`, or `all time`."
         )
         return
 
@@ -186,18 +217,23 @@ async def on_message(message):
         embed = discord.Embed(
             title=f"Google Trends: {keyword}",
             description=f"Timeframe: **{label}**",
-            color=discord.Color.blue()
+            color=0x4285F4
         )
-        embed.add_field(name="Latest interest", value=str(latest_value), inline=True)
-        embed.add_field(name="Peak interest", value=str(peak_value), inline=True)
-        embed.set_footer(text="Google Trends values are relative interest, scaled 0–100.")
+        embed.add_field(name="📈 Latest interest", value=f"**{latest_value}** / 100", inline=True)
+        embed.add_field(name="🔝 Peak interest", value=f"**{peak_value}** / 100", inline=True)
+        embed.set_footer(text="Values are relative interest scaled 0–100 · Powered by Google Trends")
         embed.set_image(url="attachment://google-trends.png")
 
         await message.channel.send(embed=embed, file=file)
 
     except Exception as e:
-        print("Google Trends command failed:", str(e))
-        await message.channel.send(f"Failed to fetch Google Trends data: `{str(e)[:150]}`")
+        err = str(e)
+        print("Google Trends command failed:", err)
+        short_err = err[:200] if len(err) > 200 else err
+        await message.channel.send(
+            f"⚠️ Could not fetch Google Trends data for **{keyword}**.\n"
+            f"```{short_err}```"
+        )
 
     await bot.process_commands(message)
 
