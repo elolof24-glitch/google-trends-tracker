@@ -117,16 +117,20 @@ def build_chart(keyword: str, label: str, labels, values):
     fig, ax = plt.subplots(figsize=(12, 5))
 
     x = range(len(values))
-    ax.plot(x, values, color="#4285F4", linewidth=2.5, zorder=3)
-    ax.fill_between(x, values, color="#4285F4", alpha=0.15, zorder=2)
+    ax.plot(x, values, color="#1a73e8", linewidth=3.5, zorder=3)
+    ax.fill_between(x, values, color="#1a73e8", alpha=0.12, zorder=2)
 
-    ax.set_title(f"Google Trends: {keyword}", fontsize=17, fontweight="bold", pad=14)
+    ax.set_title(
+        f"Google Trends: {keyword}  —  TEST UI CHANGE",
+        fontsize=17, fontweight="bold", pad=14
+    )
     ax.set_xlabel("Time", fontsize=10, labelpad=8)
     ax.set_ylabel("Interest (0–100)", fontsize=10, labelpad=8)
     ax.set_ylim(0, 105)
     ax.set_xlim(0, max(len(values) - 1, 1))
 
-    ax.grid(True, axis="y", alpha=0.15, linestyle="--", zorder=1)
+    ax.grid(True, axis="y", alpha=0.3, linestyle="-", linewidth=0.8,
+            color="#e8eaed", zorder=1)
     ax.grid(False, axis="x")
 
     # Smart tick positioning: target ~8 evenly-spaced labels
@@ -145,9 +149,12 @@ def build_chart(keyword: str, label: str, labels, values):
         ax.set_xticks([0])
         ax.set_xticklabels(labels, fontsize=8)
 
-    # Subtle spines
+    # Improved spine styling
     for spine in ax.spines.values():
-        spine.set_alpha(0.2)
+        spine.set_color("#444444")
+        spine.set_linewidth(0.8)
+
+    ax.tick_params(axis="both", which="both", length=0, labelsize=8, pad=4)
 
     # Watermark-style timeframe label in top-right corner
     ax.text(
@@ -157,10 +164,10 @@ def build_chart(keyword: str, label: str, labels, values):
         ha="right", va="top"
     )
 
-    fig.tight_layout(pad=1.5)
+    fig.tight_layout(pad=1.8)
 
     buffer = io.BytesIO()
-    plt.savefig(buffer, format="png", dpi=150, bbox_inches="tight",
+    plt.savefig(buffer, format="png", dpi=180, bbox_inches="tight",
                 facecolor=fig.get_facecolor())
     buffer.seek(0)
     plt.close(fig)
