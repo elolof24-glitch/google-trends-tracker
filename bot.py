@@ -14,7 +14,7 @@ SERPAPI_KEY = (os.getenv("SERPAPI_KEY") or "").strip()
 GOOGLE_TRENDS_CHANNEL_ID = 1503070666457350328
 
 print("token exists:", bool(TOKEN))
-print("serpapi key exists:", bool(SERPAPI_KEY)
+print("serpapi key exists:", bool(SERPAPI_KEY))
 print("google trends channel:", GOOGLE_TRENDS_CHANNEL_ID)
 
 if not TOKEN:
